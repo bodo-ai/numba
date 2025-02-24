@@ -270,7 +270,7 @@ class Callable(Type):
     """
 
     @abstractmethod
-    def get_call_type(self, context, args, kws):
+    def get_call_type(self, context, args, kws, inline=None):
         """
         Using the typing *context*, resolve the callable's signature for
         the given arguments.  A signature object is returned, or None.

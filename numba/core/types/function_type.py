@@ -40,7 +40,7 @@ class FunctionType(Type):
         self.signature.dump(tab=tab + '  ')
         print(f'{tab}END DUMP {type(self).__name__}')
 
-    def get_call_type(self, context, args, kws):
+    def get_call_type(self, context, args, kws, inline=None):
         from numba.core import typing
 
         if kws:

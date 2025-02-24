@@ -831,7 +831,7 @@ class CUDADispatcher(Dispatcher, serialize.ReduceMixin):
             return {sig: overload.local_mem_per_thread
                     for sig, overload in self.overloads.items()}
 
-    def get_call_template(self, args, kws):
+    def get_call_template(self, args, kws, inline=None):
         # Originally copied from _DispatcherBase.get_call_template. This
         # version deviates slightly from the _DispatcherBase version in order
         # to force casts when calling device functions. See e.g.

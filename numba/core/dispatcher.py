@@ -301,7 +301,7 @@ class _DispatcherBase(_dispatcher.Dispatcher):
     def fold_argument_types(self, args, kws):
         return self._compiler.fold_argument_types(args, kws)
 
-    def get_call_template(self, args, kws):
+    def get_call_template(self, args, kws, inline=None):
         """
         Get a typing.ConcreteTemplate for this dispatcher and the given
         *args* and *kws* types.  This allows to resolve the return type.
@@ -316,7 +316,7 @@ class _DispatcherBase(_dispatcher.Dispatcher):
         kws = {}
         # Ensure an overload is available
         if self._can_compile:
-            self.compile(tuple(args))
+            self.compile(tuple(args), inline=inline)
 
         # Create function type for typing
         func_name = self.py_func.__name__
@@ -755,7 +755,8 @@ class Dispatcher(serialize.ReduceMixin, _MemoMixin, _DispatcherBase):
     __numba__ = 'py_func'
 
     def __init__(self, py_func, locals={}, targetoptions={},
-                 pipeline_class=compiler.Compiler):
+                 pipeline_class=compiler.Compiler,
+                 type_only_pipeline_class=None):
         """
         Parameters
         ----------
@@ -786,6 +787,8 @@ class Dispatcher(serialize.ReduceMixin, _MemoMixin, _DispatcherBase):
         compiler_class = _FunctionCompiler
         self._compiler = compiler_class(py_func, self.targetdescr,
                                         targetoptions, locals, pipeline_class)
+        self._type_compiler = compiler_class(py_func, self.targetdescr,
+                                        targetoptions, locals, type_only_pipeline_class if type_only_pipeline_class else pipeline_class)
         self._cache_hits = collections.Counter()
         self._cache_misses = collections.Counter()
 
@@ -1179,7 +1182,7 @@ class LiftedWith(LiftedCode):
     def _numba_type_(self):
         return types.Dispatcher(self)
 
-    def get_call_template(self, args, kws):
+    def get_call_template(self, args, kws, inline=None):
         """
         Get a typing.ConcreteTemplate for this dispatcher and the given
         *args* and *kws* types.  This enables the resolving of the return type.
@@ -1275,7 +1278,7 @@ class ObjModeLiftedWith(LiftedWith):
     def _numba_type_(self):
         return types.ObjModeDispatcher(self)
 
-    def get_call_template(self, args, kws):
+    def get_call_template(self, args, kws, inline=None):
         """
         Get a typing.ConcreteTemplate for this dispatcher and the given
         *args* and *kws* types.  This enables the resolving of the return type.

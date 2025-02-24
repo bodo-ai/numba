@@ -278,7 +278,7 @@ class BaseFunction(Callable):
         """
         return self._impl_keys[sig.args]
 
-    def get_call_type(self, context, args, kws):
+    def get_call_type(self, context, args, kws, inline=None):
 
         prefer_lit = [True, False]    # old behavior preferring literal
         prefer_not = [False, True]    # new behavior preferring non-literal
@@ -384,7 +384,7 @@ class BoundFunction(Callable, Opaque):
         """
         return self.typing_key
 
-    def get_call_type(self, context, args, kws):
+    def get_call_type(self, context, args, kws, inline=None):
         template = self.template(context)
         literal_e = None
         nonliteral_e = None
@@ -528,14 +528,14 @@ class Dispatcher(WeakType, Callable, Dummy):
         self.dispatcher.dump(tab=tab + '  ')
         print(f'{tab}END DUMP')
 
-    def get_call_type(self, context, args, kws):
+    def get_call_type(self, context, args, kws, inline=None):
         """
         Resolve a call to this dispatcher using the given argument types.
         A signature returned and it is ensured that a compiled specialization
         is available for it.
         """
         template, pysig, args, kws = \
-            self.dispatcher.get_call_template(args, kws)
+            self.dispatcher.get_call_template(args, kws, inline=inline)
         sig = template(context).apply(args, kws)
         if sig:
             sig = sig.replace(pysig=pysig)
@@ -655,7 +655,7 @@ class NamedTupleClass(Callable, Opaque):
         name = "class(%s)" % (instance_class)
         super(NamedTupleClass, self).__init__(name)
 
-    def get_call_type(self, context, args, kws):
+    def get_call_type(self, context, args, kws, inline=None):
         # Overridden by the __call__ constructor resolution in
         # typing.collections
         return None
@@ -681,7 +681,7 @@ class NumberClass(Callable, DTypeSpec, Opaque):
         name = "class(%s)" % (instance_type,)
         super(NumberClass, self).__init__(name)
 
-    def get_call_type(self, context, args, kws):
+    def get_call_type(self, context, args, kws, inline=None):
         # Overridden by the __call__ constructor resolution in typing.builtins
         return None
 

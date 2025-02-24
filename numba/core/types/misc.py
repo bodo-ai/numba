@@ -300,7 +300,7 @@ class ExceptionClass(Callable, Phantom):
         self.exc_class = exc_class
         super(ExceptionClass, self).__init__(name)
 
-    def get_call_type(self, context, args, kws):
+    def get_call_type(self, context, args, kws, inline=None):
         return self.get_call_signatures()[0][0]
 
     def get_call_signatures(self):
@@ -437,7 +437,7 @@ class ClassType(Callable, Opaque):
                                            id(self), fielddesc)
         super(ClassType, self).__init__(name)
 
-    def get_call_type(self, context, args, kws):
+    def get_call_type(self, context, args, kws, inline=None):
         return self.ctor_template(context).apply(args, kws)
 
     def get_call_signatures(self):
@@ -524,7 +524,7 @@ class ContextManager(Callable, Phantom):
 
         return (), False
 
-    def get_call_type(self, context, args, kws):
+    def get_call_type(self, context, args, kws, inline=None):
         from numba.core import typing
 
         if not self.cm.is_callable:

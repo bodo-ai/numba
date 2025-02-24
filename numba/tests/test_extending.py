@@ -506,7 +506,7 @@ class CallableTypeRef(types.Callable):
         super(CallableTypeRef, self).__init__('callable_type_ref'
                                               '[{}]'.format(self.instance_type))
 
-    def get_call_type(self, context, args, kws):
+    def get_call_type(self, context, args, kws, inline=None):
 
         res_sig = None
         for template in context._functions[type(self)]:

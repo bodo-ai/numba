@@ -469,24 +469,42 @@ class ParforsUnexpectedReduceNodeError(InternalError):
 def _lower_trivial_inplace_binops(parfor, lowerer, thread_count_var, reduce_info):
     """Lower trivial inplace-binop reduction.
     """
+    # If there are cases like arr[i, :] += other_arr then we need to
+    # keep a mapping between other_arr (which will not be the same
+    # dimensionality as arr) and an array we allocate to hold the
+    # accumulated result of the reduction function.
+    slice_reduction_map = {}
+    def do_emit_binop_reduce(fn, lowerer, thread_count_var, reduce_info):
+        redvar_result = _emit_binop_reduce_call(
+            fn, lowerer, thread_count_var, reduce_info,
+        )
+        if reduce_info.redvar_typ == lowerer.typeof(inst.target.name):
+            lowerer.storevar(redvar_result, name=inst.target.name)
+        else:
+            temp_arr = parfor.init_block.scope.redefine("temp_slice_redarr", parfor.loc)
+            lowerer.fndesc.typemap[temp_arr.name] = reduce_info.redvar_typ
+            lowerer.storevar(redvar_result, name=temp_arr.name)
+            slice_reduction_map[inst.target.name] = temp_arr.name
+
     for inst in reduce_info.redvar_info.reduce_nodes:
         # Var assigns to Var?
         if _lower_var_to_var_assign(lowerer, inst):
             pass
+        # SetItem and previously detected a slice-based reduction?
+        elif _lower_setitem_var(lowerer, inst, slice_reduction_map):
+            pass
         # Is inplace-binop for the reduction?
         elif _is_right_op_and_rhs_is_init(inst, reduce_info.redvar_name, "inplace_binop"):
             fn = inst.value.fn
-            redvar_result = _emit_binop_reduce_call(
-                fn, lowerer, thread_count_var, reduce_info,
-            )
-            lowerer.storevar(redvar_result, name=inst.target.name)
+            do_emit_binop_reduce(fn, lowerer, thread_count_var, reduce_info)
         # Is binop for the reduction?
         elif _is_right_op_and_rhs_is_init(inst, reduce_info.redvar_name, "binop"):
             fn = inst.value.fn
-            redvar_result = _emit_binop_reduce_call(
-                fn, lowerer, thread_count_var, reduce_info,
-            )
-            lowerer.storevar(redvar_result, name=inst.target.name)
+            do_emit_binop_reduce(fn, lowerer, thread_count_var, reduce_info)
+        # Is arrayexpr for the reduction?
+        elif _is_right_arrayexpr_and_rhs_is_init(inst, reduce_info.redvar_name):
+            fn = inst.value.expr[0]
+            do_emit_binop_reduce(fn, lowerer, thread_count_var, reduce_info)
         # Otherwise?
         else:
             raise ParforsUnexpectedReduceNodeError(inst)
@@ -548,6 +566,19 @@ def _lower_var_to_var_assign(lowerer, inst):
     """
     if isinstance(inst, ir.Assign) and isinstance(inst.value, ir.Var):
         loaded = lowerer.loadvar(inst.value.name)
+        lowerer.storevar(loaded, name=inst.target.name)
+        return True
+    return False
+
+def _lower_setitem_var(lowerer, inst, slice_to_full):
+    """Lower arr[idx]=Var.
+
+    Returns True if-and-only-if `inst` is a setitem.
+    """
+    if (isinstance(inst, ir.SetItem)
+        and isinstance(inst.value, ir.Var)
+        and inst.value.name in slice_to_full):
+        loaded = lowerer.loadvar(slice_to_full[inst.value.name])
         lowerer.storevar(loaded, name=inst.target.name)
         return True
     return False
@@ -636,6 +667,21 @@ def _is_right_op_and_rhs_is_init(inst, redvar_name, op):
     if rhs.op != op:
         return False
     if rhs.rhs.name != f"{redvar_name}#init":
+        return False
+    return True
+
+
+def _is_right_arrayexpr_and_rhs_is_init(inst, redvar_name):
+    """Is ``inst`` an inplace-binop and the RHS is the reduction init?
+    """
+    if not isinstance(inst, ir.Assign):
+        return False
+    rhs = inst.value
+    if not isinstance(rhs, ir.Expr):
+        return False
+    if rhs.op != "arrayexpr":
+        return False
+    if rhs.expr[1][1].name != f"{redvar_name}#init":
         return False
     return True
 
@@ -1586,10 +1632,12 @@ def _create_gufunc_for_parfor_body(
         print("typemap", typemap)
 
     old_alias = flags.noalias
+    old_ap = flags.auto_parallel
     if not has_aliases:
         if config.DEBUG_ARRAY_OPT:
             print("No aliases found so adding noalias flag.")
         flags.noalias = True
+    flags.auto_parallel = False
 
     fixup_var_define_in_scope(gufunc_ir.blocks)
 
@@ -1617,6 +1665,7 @@ def _create_gufunc_for_parfor_body(
         pipeline_class=ParforGufuncCompiler)
 
     flags.noalias = old_alias
+    flags.auto_parallel = old_ap
 
     kernel_sig = signature(types.none, *gufunc_param_types)
     if config.DEBUG_ARRAY_OPT:

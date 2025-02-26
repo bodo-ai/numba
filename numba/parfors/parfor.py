@@ -2911,6 +2911,9 @@ class ParforPass(ParforPassStates):
         """run parfor conversion pass: replace Numpy calls
         with Parfors when possible and optimize the IR."""
         self._pre_run()
+        if self.options.prange:
+            ConvertLoopPass(self).run(self.func_ir.blocks)
+
         # run stencil translation to parfor
         if self.options.stencil:
             stencil_pass = StencilPass(self.func_ir, self.typemap,
@@ -2924,8 +2927,8 @@ class ParforPass(ParforPassStates):
             ConvertNumpyPass(self).run(self.func_ir.blocks)
         if self.options.reduction:
             ConvertReducePass(self).run(self.func_ir.blocks)
-        if self.options.prange:
-            ConvertLoopPass(self).run(self.func_ir.blocks)
+        #if self.options.prange:
+        #    ConvertLoopPass(self).run(self.func_ir.blocks)
         if self.options.inplace_binop:
             ConvertInplaceBinop(self).run(self.func_ir.blocks)
 
@@ -3717,37 +3720,99 @@ def get_parfor_reductions(func_ir, parfor, parfor_params, calltypes, reductions=
     if var_to_param is None:
         var_to_param = {}
 
+    class ParforBlock:
+        def __init__(self, parfor):
+            self.parfor = parfor
+        def __enter__(self):
+            blocks = wrap_parfor_blocks(parfor)
+            topo_order = find_topo_order(blocks)
+            topo_order = topo_order[1:]  # ignore init block
+            return topo_order
+        def __exit__(self, exc_type, exc_value, traceback):
+            unwrap_parfor_blocks(parfor)
+
+    """
+    def forward_reductions(parfor_params, parfor):
+        with ParforBlock(parfor) as topo_order:
+            parfor_params = parfor_params.copy()
+            for label in topo_order:
+                for stmt in parfor.loop_body[label].body:
+                    print("forward stmt", stmt)
+                    if isinstance(stmt, ir.Assign):
+                        if isinstance(stmt.value, ir.Expr):
+                            if stmt.value.op == "getitem" and stmt.value.value.name in parfor_params:
+                                print("TODD: adding to parfor_params")
+                                parfor_params.add(stmt.target.name)
+                            elif stmt.value.op == "inplace_binop" and stmt.value.lhs.name in parfor_params:
+                                print("TODD: adding to parfor_params from inplace_binop")
+                                parfor_params.add(stmt.target.name)
+                    if isinstance(stmt, Parfor):
+                        assert False
+                        #parfor_params = forward_reductions(parfor_params, stmt)
+            return parfor_params
+    """
+
+    #parfor_params = forward_reductions(parfor_params, parfor)
+
+    """
     blocks = wrap_parfor_blocks(parfor)
     topo_order = find_topo_order(blocks)
     topo_order = topo_order[1:]  # ignore init block
     unwrap_parfor_blocks(parfor)
+    """
 
-    for label in reversed(topo_order):
-        for stmt in reversed(parfor.loop_body[label].body):
-            if (isinstance(stmt, ir.Assign)
-                    and (stmt.target.name in parfor_params
-                      or stmt.target.name in var_to_param)):
-                lhs = stmt.target
-                rhs = stmt.value
-                cur_param = lhs if lhs.name in parfor_params else var_to_param[lhs.name]
-                used_vars = []
-                if isinstance(rhs, ir.Var):
-                    used_vars = [rhs.name]
-                elif isinstance(rhs, ir.Expr):
-                    used_vars = [v.name for v in stmt.value.list_vars()]
-                param_uses[cur_param].extend(used_vars)
-                for v in used_vars:
-                    var_to_param[v] = cur_param
-                # save copy of dependent stmt
-                stmt_cp = copy.deepcopy(stmt)
-                if stmt.value in calltypes:
-                    calltypes[stmt_cp.value] = calltypes[stmt.value]
-                param_nodes[cur_param].append(stmt_cp)
-            if isinstance(stmt, Parfor):
-                # recursive parfors can have reductions like test_prange8
-                get_parfor_reductions(func_ir, stmt, parfor_params, calltypes,
-                    reductions, reduce_varnames, None, param_nodes, var_to_param)
+    def backward_reductions(parfor_params, parfor, calltypes, param_uses, param_nodes):
+        with ParforBlock(parfor) as topo_order:
+            for label in reversed(topo_order):
+                for stmt in reversed(parfor.loop_body[label].body):
+                    if isinstance(stmt, ir.Assign):
+                        if (stmt.target.name in parfor_params
+                            or stmt.target.name in var_to_param):
+                            lhs = stmt.target
+                            rhs = stmt.value
+                            cur_param = lhs if lhs.name in parfor_params else var_to_param[lhs.name]
+                            used_vars = []
+                            if isinstance(rhs, ir.Var):
+                                used_vars = [rhs.name]
+                            elif isinstance(rhs, ir.Expr):
+                                used_vars = [v.name for v in stmt.value.list_vars()]
+                            param_uses[cur_param].extend(used_vars)
+                            for v in used_vars:
+                                var_to_param[v] = cur_param
+                            # save copy of dependent stmt
+                            stmt_cp = copy.deepcopy(stmt)
+                            if stmt.value in calltypes:
+                                calltypes[stmt_cp.value] = calltypes[stmt.value]
+                            param_nodes[cur_param].append(stmt_cp)
+                    elif isinstance(stmt, ir.SetItem):
+                        if (stmt.target.name in parfor_params
+                            or stmt.target.name in var_to_param):
+                            lhs = stmt.target
+                            rhs = stmt.value
+                            cur_param = lhs if lhs.name in parfor_params else var_to_param[lhs.name]
+                            used_vars = []
+                            if isinstance(rhs, ir.Var):
+                                used_vars = [rhs.name]
+                            elif isinstance(rhs, ir.Expr):
+                                used_vars = [v.name for v in stmt.value.list_vars()]
+                            param_uses[cur_param].extend(used_vars)
+                            for v in used_vars:
+                                var_to_param[v] = cur_param
+                            # save copy of dependent stmt
+                            stmt_cp = copy.deepcopy(stmt)
+                            if stmt.value in calltypes:
+                                calltypes[stmt_cp.value] = calltypes[stmt.value]
+                            param_nodes[cur_param].append(stmt_cp)
+                    if isinstance(stmt, Parfor):
+                        assert False
+                        # recursive parfors can have reductions like test_prange8
+                        #backward_reductions(parfor_params, stmt, parfor_params, calltypes, reductions, reduce_varnames, None, param_nodes, var_to_param)
+                        """
+                        get_parfor_reductions(func_ir, stmt, parfor_params, calltypes,
+                            reductions, reduce_varnames, None, param_nodes, var_to_param)
+                        """
 
+    backward_reductions(parfor_params, parfor, calltypes, param_uses, param_nodes)
     for param, used_vars in param_uses.items():
         # a parameter is a reduction variable if its value is used to update it
         # check reduce_varnames since recursive parfors might have processed
@@ -3807,17 +3872,21 @@ def get_reduction_init(nodes):
     # there could be multiple extra assignments after the reduce node
     # See: test_reduction_var_reuse
     acc_expr = list(filter(lambda x: isinstance(x.value, ir.Expr), nodes))[-1].value
-    require(isinstance(acc_expr, ir.Expr) and acc_expr.op in ['inplace_binop', 'binop'])
-    acc_expr_fn = acc_expr.fn
-    if acc_expr.op == 'binop':
-        if acc_expr_fn == operator.add:
-            acc_expr_fn = operator.iadd
-        elif acc_expr_fn == operator.sub:
-            acc_expr_fn = operator.isub
-        elif acc_expr_fn == operator.mul:
-            acc_expr_fn = operator.imul
-        elif acc_expr_fn == operator.truediv:
-            acc_expr_fn = operator.itruediv
+    require(isinstance(acc_expr, ir.Expr) and acc_expr.op in ['inplace_binop', 'binop', 'arrayexpr'])
+    if acc_expr.op == 'arrayexpr':
+        acc_expr_fn = acc_expr.expr[0]
+    else:
+        acc_expr_fn = acc_expr.fn
+
+    if acc_expr_fn == operator.add:
+        acc_expr_fn = operator.iadd
+    elif acc_expr_fn == operator.sub:
+        acc_expr_fn = operator.isub
+    elif acc_expr_fn == operator.mul:
+        acc_expr_fn = operator.imul
+    elif acc_expr_fn == operator.truediv:
+        acc_expr_fn = operator.itruediv
+
     if acc_expr_fn == operator.iadd or acc_expr_fn == operator.isub:
         return 0, acc_expr_fn
     if (  acc_expr_fn == operator.imul
@@ -3826,22 +3895,26 @@ def get_reduction_init(nodes):
     return None, None
 
 def supported_reduction(x, func_ir):
-    if x.op == 'inplace_binop' or x.op == 'binop':
-        if x.fn == operator.ifloordiv or x.fn == operator.floordiv:
+    if x.op in ['inplace_binop', 'binop', 'arrayexpr']:
+        if x.op == 'arrayexpr':
+            fn = x.expr[0]
+        else:
+            fn = x.fn
+        if fn == operator.ifloordiv or fn == operator.floordiv:
             raise errors.NumbaValueError(("Parallel floordiv reductions are not supported. "
                               "If all divisors are integers then a floordiv "
                               "reduction can in some cases be parallelized as "
                               "a multiply reduction followed by a floordiv of "
                               "the resulting product."), x.loc)
         supps = [operator.iadd,
-                 operator.isub,
-                 operator.imul,
-                 operator.itruediv,
-                 operator.add,
-                 operator.sub,
-                 operator.mul,
-                 operator.truediv]
-        return x.fn in supps
+                operator.isub,
+                operator.imul,
+                operator.itruediv,
+                operator.add,
+                operator.sub,
+                operator.mul,
+                operator.truediv]
+        return fn in supps
     if x.op == 'call':
         callname = guard(find_callname, func_ir, x)
         if callname in [
@@ -3886,8 +3959,10 @@ def get_reduce_nodes(reduction_node, nodes, func_ir):
             raise AssertionError("unexpected cycle in lookup()")
         return res
 
-    name = reduction_node.name
-    unversioned_name = reduction_node.unversioned_name
+    name = {reduction_node.name}
+    unversioned_name = {reduction_node.unversioned_name}
+    #for stmt in nodes:
+    #    print("nodes", stmt)
     for i, stmt in enumerate(nodes):
         lhs = stmt.target
         rhs = stmt.value
@@ -3897,70 +3972,77 @@ def get_reduce_nodes(reduction_node, nodes, func_ir):
         if isinstance(rhs, ir.Expr):
             in_vars = set(noncyclic_lookup(v, True).name
                           for v in rhs.list_vars())
-            if name in in_vars:
-                # reductions like sum have an assignment afterwards
-                # e.g. $2 = a + $1; a = $2
-                # reductions that are functions calls like max() don't have an
-                # extra assignment afterwards
+            if rhs.op == "getitem":
+                name.add(lhs.name)
+                unversioned_name.add(lhs.unversioned_name)
+            else:
+                if name & in_vars:
+                    # reductions like sum have an assignment afterwards
+                    # e.g. $2 = a + $1; a = $2
+                    # reductions that are functions calls like max() don't have an
+                    # extra assignment afterwards
 
-                # This code was created when Numba had an IR generation strategy
-                # where a binop for a reduction would be followed by an
-                # assignment as follows:
-                #$c.4.15 = inplace_binop(fn=<iadd>, ...>, lhs=c.3, rhs=$const20)
-                #c.4 = $c.4.15
+                    # This code was created when Numba had an IR generation strategy
+                    # where a binop for a reduction would be followed by an
+                    # assignment as follows:
+                    #$c.4.15 = inplace_binop(fn=<iadd>, ...>, lhs=c.3, rhs=$const20)
+                    #c.4 = $c.4.15
 
-                # With Python 3.12 changes, Numba may separate that assignment
-                # to a new basic block.  The code below looks and sees if an
-                # assignment to the reduction var follows the reduction operator
-                # and if not it searches the rest of the reduction nodes to find
-                # the assignment that should follow the reduction operator
-                # and then reorders the reduction nodes so that assignment
-                # follows the reduction operator.
-                if (i + 1 < len(nodes) and
-                    ((not isinstance(nodes[i + 1], ir.Assign)) or
-                     nodes[i + 1].target.unversioned_name != unversioned_name)):
-                    foundj = None
-                    # Iterate through the rest of the reduction nodes.
-                    for j, jstmt in enumerate(nodes[i + 1:]):
-                        # If this stmt is an assignment where the right-hand
-                        # side of the assignment is the output of the reduction
-                        # operator.
-                        if isinstance(jstmt, ir.Assign) and jstmt.value == lhs:
-                            # Remember the index of this node.  Because of
-                            # nodes[i+1] above, we have to add i + 1 to j below
-                            # to get the index in the original nodes list.
-                            foundj = i + j + 1
-                            break
-                    if foundj is not None:
-                        # If we found the correct assignment then move it to
-                        # after the reduction operator.
-                        nodes = (nodes[:i + 1] +   # nodes up to operator
-                                 nodes[foundj:foundj + 1] + # assignment node
-                                 nodes[i + 1:foundj] + # between op and assign
-                                 nodes[foundj + 1:]) # after assignment node
+                    # With Python 3.12 changes, Numba may separate that assignment
+                    # to a new basic block.  The code below looks and sees if an
+                    # assignment to the reduction var follows the reduction operator
+                    # and if not it searches the rest of the reduction nodes to find
+                    # the assignment that should follow the reduction operator
+                    # and then reorders the reduction nodes so that assignment
+                    # follows the reduction operator.
+                    next_node_assign_or_set = (isinstance(nodes[i + 1], ir.Assign)
+                                               or isinstance(nodes[i + 1], ir.SetItem))
+                    if (i + 1 < len(nodes) and
+                        ((not next_node_assign_or_set ) or
+                        nodes[i + 1].target.unversioned_name not in unversioned_name)):
+                        foundj = None
+                        # Iterate through the rest of the reduction nodes.
+                        for j, jstmt in enumerate(nodes[i + 1:]):
+                            # If this stmt is an assignment where the right-hand
+                            # side of the assignment is the output of the reduction
+                            # operator.
+                            if isinstance(jstmt, ir.Assign) and jstmt.value == lhs:
+                                # Remember the index of this node.  Because of
+                                # nodes[i+1] above, we have to add i + 1 to j below
+                                # to get the index in the original nodes list.
+                                foundj = i + j + 1
+                                break
+                        if foundj is not None:
+                            # If we found the correct assignment then move it to
+                            # after the reduction operator.
+                            nodes = (nodes[:i + 1] +   # nodes up to operator
+                                    nodes[foundj:foundj + 1] + # assignment node
+                                    nodes[i + 1:foundj] + # between op and assign
+                                    nodes[foundj + 1:]) # after assignment node
 
-                if (not (i+1 < len(nodes) and isinstance(nodes[i+1], ir.Assign)
-                        and nodes[i+1].target.unversioned_name == unversioned_name)
-                        and lhs.unversioned_name != unversioned_name):
-                    raise ValueError(
-                        f"Use of reduction variable {unversioned_name!r} other "
-                        "than in a supported reduction function is not "
-                        "permitted."
-                    )
+                    if (rhs.op != 'inplace_binop' and
+                            not (i+1 < len(nodes) and next_node_assign_or_set
+                            and nodes[i+1].target.unversioned_name in unversioned_name)
+                            and lhs.unversioned_name not in unversioned_name):
+                        raise ValueError(
+                            f"Use of reduction variable {unversioned_name!r} other "
+                            "than in a supported reduction function is not "
+                            "permitted."
+                        )
 
-                if not supported_reduction(rhs, func_ir):
-                    raise ValueError(("Use of reduction variable " + unversioned_name +
-                                      " in an unsupported reduction function."))
-                args = [(x.name, noncyclic_lookup(x, True))
-                        for x in get_expr_args(rhs) ]
-                non_red_args = [ x for (x, y) in args if y.name != name ]
-                assert len(non_red_args) == 1
-                args = [ (x, y) for (x, y) in args if x != y.name ]
-                replace_dict = dict(args)
-                replace_dict[non_red_args[0]] = ir.Var(lhs.scope, name+"#init", lhs.loc)
-                replace_vars_inner(rhs, replace_dict)
-                reduce_nodes = nodes[i:]
-                break
+                    if not supported_reduction(rhs, func_ir):
+                        raise ValueError(("Use of reduction variable " + unversioned_name +
+                                        " in an unsupported reduction function."))
+                    args = [(x.name, noncyclic_lookup(x, True))
+                            for x in get_expr_args(rhs) ]
+                    non_red_args = [ x for (x, y) in args if y.name not in name ]
+                    assert len(non_red_args) == 1
+                    args = [ (x, y) for (x, y) in args if x != y.name ]
+                    replace_dict = dict(args)
+                    replace_dict[non_red_args[0]] = ir.Var(lhs.scope, reduction_node.name+"#init", lhs.loc)
+                    replace_vars_inner(rhs, replace_dict)
+                    reduce_nodes = nodes[i:]
+                    break
     return reduce_nodes
 
 def get_expr_args(expr):
@@ -3969,8 +4051,11 @@ def get_expr_args(expr):
     """
     if expr.op in ['binop', 'inplace_binop']:
         return [expr.lhs, expr.rhs]
-    if expr.op == 'call':
+    elif expr.op == 'call':
         return [v for v in expr.args]
+    elif expr.op == 'arrayexpr':
+        return expr.list_vars()
+
     raise NotImplementedError("get arguments for expression {}".format(expr))
 
 def visit_parfor_pattern_vars(parfor, callback, cbdata):

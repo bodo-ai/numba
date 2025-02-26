@@ -1735,6 +1735,9 @@ https://numba.readthedocs.io/en/stable/user/troubleshoot.html#my-code-has-an-unt
         elif expr.op == 'undef':
             self.add_type(target.name, types._undef_var, loc=inst.loc)
 
+        elif expr.op == 'arrayexpr':
+            self.add_type(target.name, expr.ty, loc=inst.loc)
+
         else:
             msg = "Unsupported op-code encountered: %s" % expr
             raise UnsupportedError(msg, loc=inst.loc)

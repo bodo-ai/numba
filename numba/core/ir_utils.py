@@ -335,8 +335,12 @@ def legalize_names(varnames):
     parameter names.
     """
     var_map = {}
+    print("foo", varnames)
     for var in varnames:
+        print("bar", var)
         new_name = var.replace("_", "__").replace("$", "_").replace(".", "_")
+        if new_name in var_map:
+            print("problem:", new_name, var_map)
         assert new_name not in var_map
         var_map[var] = new_name
     return var_map

@@ -1274,6 +1274,7 @@ def _create_gufunc_for_parfor_body(
         print("loop_indices = ", loop_indices, " ", type(loop_indices))
         print("loop_body = ", loop_body, " ", type(loop_body))
         _print_body(loop_body)
+        print("parfor_tuple_params", parfor_tuple_params)
 
     # Some Var are not legal parameter names so create a dict of potentially illegal
     # param name to guaranteed legal name.

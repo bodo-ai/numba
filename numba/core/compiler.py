@@ -587,10 +587,10 @@ class DefaultPassBuilder(object):
         # Annotate only once legalized
         pm.add_pass(AnnotateTypes, "annotate types")
         # lower
-        #if state.flags.auto_parallel.enabled:
-        #    pm.add_pass(NativeParforLowering, "native parfor lowering")
-        #else:
-        pm.add_pass(NativeLowering, "native lowering")
+        if state.flags.auto_parallel.enabled:
+            pm.add_pass(NativeParforLowering, "native parfor lowering")
+        else:
+            pm.add_pass(NativeLowering, "native lowering")
         pm.add_pass(NoPythonBackend, "nopython mode backend")
         pm.finalize()
         return pm
@@ -626,7 +626,7 @@ class DefaultPassBuilder(object):
         assert state.func_ir
         pm.add_pass(IRProcessing, "processing IR")
         pm.add_pass(NopythonTypeInference, "nopython frontend")
-        #pm.add_pass(ParforPreLoweringPass, "parfor prelowering")
+        pm.add_pass(ParforPreLoweringPass, "parfor prelowering")
 
         pm.finalize()
         return pm

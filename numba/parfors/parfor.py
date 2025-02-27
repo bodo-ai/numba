@@ -3720,99 +3720,66 @@ def get_parfor_reductions(func_ir, parfor, parfor_params, calltypes, reductions=
     if var_to_param is None:
         var_to_param = {}
 
-    class ParforBlock:
-        def __init__(self, parfor):
-            self.parfor = parfor
-        def __enter__(self):
-            blocks = wrap_parfor_blocks(parfor)
-            topo_order = find_topo_order(blocks)
-            topo_order = topo_order[1:]  # ignore init block
-            return topo_order
-        def __exit__(self, exc_type, exc_value, traceback):
-            unwrap_parfor_blocks(parfor)
-
-    """
-    def forward_reductions(parfor_params, parfor):
-        with ParforBlock(parfor) as topo_order:
-            parfor_params = parfor_params.copy()
-            for label in topo_order:
-                for stmt in parfor.loop_body[label].body:
-                    print("forward stmt", stmt)
-                    if isinstance(stmt, ir.Assign):
-                        if isinstance(stmt.value, ir.Expr):
-                            if stmt.value.op == "getitem" and stmt.value.value.name in parfor_params:
-                                print("TODD: adding to parfor_params")
-                                parfor_params.add(stmt.target.name)
-                            elif stmt.value.op == "inplace_binop" and stmt.value.lhs.name in parfor_params:
-                                print("TODD: adding to parfor_params from inplace_binop")
-                                parfor_params.add(stmt.target.name)
-                    if isinstance(stmt, Parfor):
-                        assert False
-                        #parfor_params = forward_reductions(parfor_params, stmt)
-            return parfor_params
-    """
-
-    #parfor_params = forward_reductions(parfor_params, parfor)
-
-    """
     blocks = wrap_parfor_blocks(parfor)
     topo_order = find_topo_order(blocks)
     topo_order = topo_order[1:]  # ignore init block
     unwrap_parfor_blocks(parfor)
-    """
 
-    def backward_reductions(parfor_params, parfor, calltypes, param_uses, param_nodes):
-        with ParforBlock(parfor) as topo_order:
-            for label in reversed(topo_order):
-                for stmt in reversed(parfor.loop_body[label].body):
-                    if isinstance(stmt, ir.Assign):
-                        if (stmt.target.name in parfor_params
-                            or stmt.target.name in var_to_param):
-                            lhs = stmt.target
-                            rhs = stmt.value
-                            cur_param = lhs if lhs.name in parfor_params else var_to_param[lhs.name]
-                            used_vars = []
-                            if isinstance(rhs, ir.Var):
-                                used_vars = [rhs.name]
-                            elif isinstance(rhs, ir.Expr):
-                                used_vars = [v.name for v in stmt.value.list_vars()]
-                            param_uses[cur_param].extend(used_vars)
-                            for v in used_vars:
-                                var_to_param[v] = cur_param
-                            # save copy of dependent stmt
-                            stmt_cp = copy.deepcopy(stmt)
-                            if stmt.value in calltypes:
-                                calltypes[stmt_cp.value] = calltypes[stmt.value]
-                            param_nodes[cur_param].append(stmt_cp)
-                    elif isinstance(stmt, ir.SetItem):
-                        if (stmt.target.name in parfor_params
-                            or stmt.target.name in var_to_param):
-                            lhs = stmt.target
-                            rhs = stmt.value
-                            cur_param = lhs if lhs.name in parfor_params else var_to_param[lhs.name]
-                            used_vars = []
-                            if isinstance(rhs, ir.Var):
-                                used_vars = [rhs.name]
-                            elif isinstance(rhs, ir.Expr):
-                                used_vars = [v.name for v in stmt.value.list_vars()]
-                            param_uses[cur_param].extend(used_vars)
-                            for v in used_vars:
-                                var_to_param[v] = cur_param
-                            # save copy of dependent stmt
-                            stmt_cp = copy.deepcopy(stmt)
-                            if stmt.value in calltypes:
-                                calltypes[stmt_cp.value] = calltypes[stmt.value]
-                            param_nodes[cur_param].append(stmt_cp)
-                    if isinstance(stmt, Parfor):
-                        assert False
-                        # recursive parfors can have reductions like test_prange8
-                        #backward_reductions(parfor_params, stmt, parfor_params, calltypes, reductions, reduce_varnames, None, param_nodes, var_to_param)
-                        """
-                        get_parfor_reductions(func_ir, stmt, parfor_params, calltypes,
-                            reductions, reduce_varnames, None, param_nodes, var_to_param)
-                        """
+    Intentionally break the code here so that his message gets read 
+    before continuing development of this branch.
+    This code was meant to catch a[i,:] += b as a reduction but 
+    it also catches the expansion of a=b (both arrays) as a reduction.
+    If an array is accessed with all the parfor indices then it will
+    access distinct parts of the array and so isn't really a reduction.
+    Perhaps this code should be added to bodo only as some pass that
+    isn't reduction related to catch cases where a REP array is created
+    in this way where you still need communication (but not post 
+    communication processing) to get the right values in the array.
+    for label in reversed(topo_order):
+        for stmt in reversed(parfor.loop_body[label].body):
+            if isinstance(stmt, ir.Assign):
+                if (stmt.target.name in parfor_params
+                    or stmt.target.name in var_to_param):
+                    lhs = stmt.target
+                    rhs = stmt.value
+                    cur_param = lhs if lhs.name in parfor_params else var_to_param[lhs.name]
+                    used_vars = []
+                    if isinstance(rhs, ir.Var):
+                        used_vars = [rhs.name]
+                    elif isinstance(rhs, ir.Expr):
+                        used_vars = [v.name for v in stmt.value.list_vars()]
+                    param_uses[cur_param].extend(used_vars)
+                    for v in used_vars:
+                        var_to_param[v] = cur_param
+                    # save copy of dependent stmt
+                    stmt_cp = copy.deepcopy(stmt)
+                    if stmt.value in calltypes:
+                        calltypes[stmt_cp.value] = calltypes[stmt.value]
+                    param_nodes[cur_param].append(stmt_cp)
+            elif isinstance(stmt, ir.SetItem):
+                if (stmt.target.name in parfor_params
+                    or stmt.target.name in var_to_param):
+                    lhs = stmt.target
+                    rhs = stmt.value
+                    cur_param = lhs if lhs.name in parfor_params else var_to_param[lhs.name]
+                    used_vars = []
+                    if isinstance(rhs, ir.Var):
+                        used_vars = [rhs.name]
+                    elif isinstance(rhs, ir.Expr):
+                        used_vars = [v.name for v in stmt.value.list_vars()]
+                    param_uses[cur_param].extend(used_vars)
+                    for v in used_vars:
+                        var_to_param[v] = cur_param
+                    # save copy of dependent stmt
+                    stmt_cp = copy.deepcopy(stmt)
+                    if stmt.value in calltypes:
+                        calltypes[stmt_cp.value] = calltypes[stmt.value]
+                    param_nodes[cur_param].append(stmt_cp)
+            if isinstance(stmt, Parfor):
+                # recursive parfors can have reductions like test_prange8
+                get_parfor_reductions(func_ir, stmt, parfor_params, calltypes,
+                    reductions, reduce_varnames, None, param_nodes, var_to_param)
 
-    backward_reductions(parfor_params, parfor, calltypes, param_uses, param_nodes)
     for param, used_vars in param_uses.items():
         # a parameter is a reduction variable if its value is used to update it
         # check reduce_varnames since recursive parfors might have processed
@@ -3973,8 +3940,9 @@ def get_reduce_nodes(reduction_node, nodes, func_ir):
             in_vars = set(noncyclic_lookup(v, True).name
                           for v in rhs.list_vars())
             if rhs.op == "getitem":
-                name.add(lhs.name)
-                unversioned_name.add(lhs.unversioned_name)
+                if rhs.value.name in name:
+                    name.add(lhs.name)
+                    unversioned_name.add(lhs.unversioned_name)
             else:
                 if name & in_vars:
                     # reductions like sum have an assignment afterwards
@@ -3995,8 +3963,9 @@ def get_reduce_nodes(reduction_node, nodes, func_ir):
                     # the assignment that should follow the reduction operator
                     # and then reorders the reduction nodes so that assignment
                     # follows the reduction operator.
-                    next_node_assign_or_set = (isinstance(nodes[i + 1], ir.Assign)
-                                               or isinstance(nodes[i + 1], ir.SetItem))
+                    if i + 1 < len(nodes):
+                        next_node_assign_or_set = (isinstance(nodes[i + 1], ir.Assign)
+                                                or isinstance(nodes[i + 1], ir.SetItem))
                     if (i + 1 < len(nodes) and
                         ((not next_node_assign_or_set ) or
                         nodes[i + 1].target.unversioned_name not in unversioned_name)):
@@ -4021,7 +3990,7 @@ def get_reduce_nodes(reduction_node, nodes, func_ir):
                                     nodes[foundj + 1:]) # after assignment node
 
                     if (rhs.op != 'inplace_binop' and
-                            not (i+1 < len(nodes) and next_node_assign_or_set
+                        not (i+1 < len(nodes) and next_node_assign_or_set
                             and nodes[i+1].target.unversioned_name in unversioned_name)
                             and lhs.unversioned_name not in unversioned_name):
                         raise ValueError(
